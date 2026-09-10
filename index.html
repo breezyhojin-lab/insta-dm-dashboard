@@ -1,0 +1,756 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>DM 자동화 대시보드</title>
+<style>
+  :root{
+    color-scheme: light;
+    --bg:#F4F0E6;
+    --fg:#111;
+    --line:#111;
+    --warn:#b00020;
+    --input-bg:#fff;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans KR", sans-serif;
+  }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; padding:0; background:var(--bg); color:var(--fg); overflow-x:hidden; width:100%; }
+  body{ font-family:var(--sans); font-size:16px; line-height:1.5; -webkit-text-size-adjust:100%; }
+  .mono{ font-family:var(--mono); }
+  /* 화면을 숨길 때는 hidden 표시를 붙이는데, 아래 #lock-screen 의 display:flex 같은
+     규칙이 그 숨김을 덮어써서 계속 보이는 사고가 난다. 그래서 hidden 이 붙은 것은
+     무슨 일이 있어도 안 보이도록 여기서 못박는다. */
+  [hidden]{ display:none !important; }
+  #lock-screen{ min-height:100vh; display:flex; align-items:center; justify-content:center; padding:16px; }
+  .lock-box{ width:100%; max-width:360px; }
+  #app{ max-width:900px; margin:0 auto; padding:12px 12px 40px; }
+  .ascii-title{ font-weight:bold; margin:0 0 10px; letter-spacing:0.5px; }
+  .box{ border:2px solid var(--line); border-radius:0; padding:12px; margin-bottom:12px; background:var(--bg); }
+  .row{ display:flex; gap:8px; flex-wrap:wrap; }
+  .stack{ display:flex; flex-direction:column; gap:10px; }
+  .space-between{ justify-content:space-between; align-items:center; }
+  .topbar{ justify-content:flex-end; margin-bottom:10px; }
+  .btn{
+    display:inline-flex; align-items:center; justify-content:center;
+    min-height:44px; padding:0 16px; border:2px solid var(--line); border-radius:0;
+    background:var(--bg); color:var(--fg); font-family:var(--sans); font-size:15px;
+    cursor:pointer;
+  }
+  .btn:active{ background:var(--fg); color:var(--bg); }
+  .btn-primary{ background:var(--fg); color:var(--bg); }
+  .btn-primary:active{ background:var(--bg); color:var(--fg); }
+  .btn-block{ width:100%; }
+  .btn-small{ min-height:36px; padding:0 10px; font-size:13px; }
+  .btn:disabled{ opacity:.5; cursor:not-allowed; }
+  .btn:disabled:active{ background:var(--bg); color:var(--fg); }
+  .error-text{ color:var(--warn); font-weight:bold; margin:8px 0; }
+  .switch-line{ margin-bottom:10px; }
+  .warn-line{
+    color:var(--warn); border:2px solid var(--warn); padding:6px 8px; font-weight:bold; display:inline-block;
+  }
+  .text-input, input[type="text"], input[type="password"], input[type="number"], textarea{
+    font-family:var(--sans); font-size:15px; padding:10px; border:2px solid var(--line);
+    border-radius:0; background:var(--input-bg); color:var(--fg); width:100%; min-height:44px;
+  }
+  textarea{ font-family:var(--mono); min-height:88px; resize:vertical; }
+  input[readonly]{ background:#e9e5d8; }
+  .field{ display:flex; flex-direction:column; gap:4px; margin-bottom:10px; }
+  .field-label{ font-weight:bold; font-size:14px; }
+  .field-hint{ font-size:12px; opacity:.75; }
+  .radio-group{ display:flex; gap:16px; flex-wrap:wrap; }
+  .checkbox-row{ display:flex; align-items:center; gap:8px; font-size:15px; }
+  .checkbox-row input[type="checkbox"], .checkbox-row input[type="radio"]{ width:20px; height:20px; flex:0 0 auto; }
+  .post-card{ }
+  .post-top{ gap:10px; align-items:flex-start; flex-wrap:nowrap; }
+  .post-thumb{ width:56px; height:56px; object-fit:cover; border:2px solid var(--line); flex:0 0 auto; }
+  .post-thumb-empty{ display:flex; align-items:center; justify-content:center; font-size:12px; }
+  .post-info{ flex:1; min-width:0; }
+  .post-title{ font-weight:bold; margin-bottom:4px; word-break:break-word; }
+  .post-counts{ margin-top:2px; }
+  .post-actions{ margin-top:10px; flex-wrap:wrap; }
+  #post-list{ display:flex; flex-direction:column; gap:0; }
+  #post-list .box{ margin-bottom:12px; }
+  .edit-layout{ display:block; }
+  .preview-panel{ margin-top:16px; }
+  .preview-bubble{
+    background:var(--fg); color:var(--bg); padding:10px 12px;
+    border-radius:16px 16px 4px 16px; max-width:90%; word-break:break-word; margin-bottom:4px;
+  }
+  .preview-btn{ border:2px solid var(--fg); padding:8px; text-align:center; margin-bottom:8px; background:var(--input-bg); }
+  .preview-link{ text-decoration:underline; margin-bottom:8px; word-break:break-all; }
+  @media (min-width:820px){
+    .edit-layout{ display:flex; gap:20px; align-items:flex-start; }
+    .edit-form{ flex:1; min-width:0; }
+    .preview-panel{ width:300px; flex:0 0 300px; margin-top:0; position:sticky; top:12px; }
+  }
+</style>
+</head>
+<body>
+
+<div id="lock-screen">
+  <div class="box lock-box">
+    <div class="ascii-title mono">┌─ DM 자동화 ─┐</div>
+    <p>암호를 입력하세요.</p>
+    <input id="lock-input" type="password" class="text-input" placeholder="암호" autocomplete="off">
+    <div id="lock-error" class="error-text" hidden></div>
+    <button id="lock-submit" type="button" class="btn btn-primary btn-block" style="margin-top:10px;">들어가기</button>
+  </div>
+</div>
+
+<div id="app" hidden>
+  <div class="row topbar">
+    <button id="lock-btn" type="button" class="btn btn-small">잠그기</button>
+  </div>
+
+  <div id="home-view">
+    <div class="box">
+      <div class="ascii-title mono">┌─ 오늘 현황 ─┐</div>
+      <div class="row switch-line space-between">
+        <span>전체 자동화</span>
+        <button id="global-toggle" type="button" class="btn">○ OFF</button>
+      </div>
+      <div id="gauge-text" class="mono" style="margin-bottom:6px;"></div>
+      <div id="token-line" class="mono"></div>
+    </div>
+
+    <div id="home-error" class="error-text" hidden></div>
+
+    <div class="row space-between" style="margin-bottom:8px;">
+      <div class="ascii-title mono" style="margin:0;">┌─ 게시물 ─┐</div>
+      <button id="refresh-btn" type="button" class="btn btn-small">새로고침</button>
+    </div>
+
+    <div id="post-list"></div>
+
+    <div id="empty-state" class="box" hidden>
+      <p style="margin-top:0;">아직 등록된 게시물이 없습니다.</p>
+    </div>
+
+    <button id="add-post-btn" type="button" class="btn btn-primary btn-block" style="margin-top:4px;">+ 게시물 추가</button>
+  </div>
+
+  <div id="edit-view" hidden>
+    <div class="ascii-title mono">┌─ 게시물 규칙 ─┐</div>
+    <div id="edit-error" class="error-text" hidden></div>
+
+    <div class="edit-layout">
+      <div class="edit-form stack">
+
+        <div class="field">
+          <label class="field-label" for="f-media-id">게시물 번호(숫자만)</label>
+          <input id="f-media-id" type="text" inputmode="numeric" autocomplete="off">
+          <div class="field-hint">새로 등록할 때만 입력할 수 있고, 수정할 때는 바꿀 수 없습니다.</div>
+        </div>
+
+        <div class="field">
+          <label class="field-label" for="f-title">제목</label>
+          <input id="f-title" type="text">
+        </div>
+
+        <div class="field">
+          <label class="field-label" for="f-permalink">게시물 링크</label>
+          <input id="f-permalink" type="text" placeholder="https://...">
+        </div>
+
+        <div class="field">
+          <label class="field-label" for="f-thumb">썸네일 주소</label>
+          <input id="f-thumb" type="text" placeholder="https://...">
+        </div>
+
+        <div class="field">
+          <div class="field-label">댓글 조건</div>
+          <div class="radio-group">
+            <label class="checkbox-row"><input type="radio" name="trigger_type" id="f-trigger-any">모든 댓글</label>
+            <label class="checkbox-row"><input type="radio" name="trigger_type" id="f-trigger-keyword">특정 단어가 있는 댓글</label>
+          </div>
+        </div>
+
+        <div class="field" id="f-keywords-wrap">
+          <label class="field-label" for="f-keywords">특정 단어(한 줄에 하나씩)</label>
+          <textarea id="f-keywords" rows="4"></textarea>
+        </div>
+
+        <div class="field">
+          <label class="checkbox-row"><input type="checkbox" id="f-ignore-case">대소문자 구분 안 함</label>
+          <label class="checkbox-row"><input type="checkbox" id="f-ignore-space">띄어쓰기 무시</label>
+          <div class="field-hint">링크 라고 써도 링 크 처럼 띄어 쓴 댓글까지 잡아냅니다.</div>
+        </div>
+
+        <div class="field">
+          <label class="field-label" for="f-step1-msg">첫 DM 본문</label>
+          <textarea id="f-step1-msg" rows="4"></textarea>
+        </div>
+
+        <div class="field">
+          <label class="field-label" for="f-step1-btn">버튼 문구(최대 20자)</label>
+          <input id="f-step1-btn" type="text" maxlength="20">
+        </div>
+
+        <div class="field">
+          <label class="field-label" for="f-step2-msg">링크 DM 본문</label>
+          <textarea id="f-step2-msg" rows="4"></textarea>
+        </div>
+
+        <div class="field">
+          <label class="field-label" for="f-step2-link">링크 주소</label>
+          <input id="f-step2-link" type="text" placeholder="https://...">
+        </div>
+
+        <div class="field">
+          <label class="field-label" for="f-not-following">팔로우 안 했을 때 안내</label>
+          <textarea id="f-not-following" rows="3"></textarea>
+        </div>
+
+        <div class="field">
+          <label class="field-label" for="f-max-retry">재시도 횟수(0~10)</label>
+          <input id="f-max-retry" type="number" min="0" max="10" step="1">
+        </div>
+
+        <div class="field">
+          <label class="field-label" for="f-comment-replies">댓글 답글 후보(한 줄에 하나씩)</label>
+          <textarea id="f-comment-replies" rows="4"></textarea>
+        </div>
+
+        <div class="field">
+          <label class="checkbox-row"><input type="checkbox" id="f-reply-to-comment">댓글에 답글도 달기</label>
+        </div>
+
+        <div class="field">
+          <div class="field-label">상태</div>
+          <div class="radio-group">
+            <label class="checkbox-row"><input type="radio" name="status" id="f-status-active">활성</label>
+            <label class="checkbox-row"><input type="radio" name="status" id="f-status-paused">정지</label>
+          </div>
+        </div>
+
+        <div class="row" style="margin-top:4px;">
+          <button id="save-btn" type="button" class="btn btn-primary">저장</button>
+          <button id="cancel-btn" type="button" class="btn">취소</button>
+        </div>
+
+      </div>
+
+      <div class="preview-panel box">
+        <div class="ascii-title mono">┌─ 미리보기 ─┐</div>
+        <div id="preview-body" class="stack"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  // 창구(admin-api) 주소. 화면은 GitHub Pages 에, 창구는 Supabase 에 있어서 주소가 서로 다르다.
+  var API_BASE = "https://vbrbmpppruunvkkwjmhv.supabase.co/functions/v1/admin";
+
+  // 세션스토리지를 쓰는 이유: 브라우저 탭을 닫으면 자동으로 값이 지워진다.
+  // 로컬스토리지는 브라우저를 껐다 켜도, 컴퓨터를 재부팅해도 계속 남아있어서
+  // 공용 컴퓨터나 남의 기기에서 이 화면을 열었을 때 암호(대체 값)가 계속 남는
+  // 위험이 있다. 그래서 여기서는 절대 로컬스토리지를 쓰지 않는다.
+  var SESSION_KEY = "admin_dm_key";
+
+  var state = { posts: [], settings: null, today: null, editingId: null, saving: false };
+
+  var lockScreen = document.getElementById("lock-screen");
+  var app = document.getElementById("app");
+  var lockInput = document.getElementById("lock-input");
+  var lockError = document.getElementById("lock-error");
+  var lockSubmit = document.getElementById("lock-submit");
+  var lockBtn = document.getElementById("lock-btn");
+
+  var homeView = document.getElementById("home-view");
+  var editView = document.getElementById("edit-view");
+  var homeError = document.getElementById("home-error");
+  var editError = document.getElementById("edit-error");
+  var globalToggle = document.getElementById("global-toggle");
+  var gaugeText = document.getElementById("gauge-text");
+  var tokenLine = document.getElementById("token-line");
+  var postList = document.getElementById("post-list");
+  var emptyState = document.getElementById("empty-state");
+  var addPostBtn = document.getElementById("add-post-btn");
+  var refreshBtn = document.getElementById("refresh-btn");
+  var saveBtn = document.getElementById("save-btn");
+  var cancelBtn = document.getElementById("cancel-btn");
+  var previewBody = document.getElementById("preview-body");
+
+  var fMediaId = document.getElementById("f-media-id");
+  var fTitle = document.getElementById("f-title");
+  var fPermalink = document.getElementById("f-permalink");
+  var fThumb = document.getElementById("f-thumb");
+  var fTriggerAny = document.getElementById("f-trigger-any");
+  var fTriggerKeyword = document.getElementById("f-trigger-keyword");
+  var fKeywordsWrap = document.getElementById("f-keywords-wrap");
+  var fKeywords = document.getElementById("f-keywords");
+  var fIgnoreCase = document.getElementById("f-ignore-case");
+  var fIgnoreSpace = document.getElementById("f-ignore-space");
+  var fStep1Msg = document.getElementById("f-step1-msg");
+  var fStep1Btn = document.getElementById("f-step1-btn");
+  var fStep2Msg = document.getElementById("f-step2-msg");
+  var fStep2Link = document.getElementById("f-step2-link");
+  var fNotFollowing = document.getElementById("f-not-following");
+  var fMaxRetry = document.getElementById("f-max-retry");
+  var fCommentReplies = document.getElementById("f-comment-replies");
+  var fReplyToComment = document.getElementById("f-reply-to-comment");
+  var fStatusActive = document.getElementById("f-status-active");
+  var fStatusPaused = document.getElementById("f-status-paused");
+
+  function showError(box, message) {
+    box.textContent = message;
+    box.hidden = false;
+  }
+  function clearError(box) {
+    box.textContent = "";
+    box.hidden = true;
+  }
+
+  // 서버 요청 하나를 보내고 {status, json} 을 돌려준다.
+  function apiRequest(path, method, bodyObj) {
+    var headers = {};
+    var key = sessionStorage.getItem(SESSION_KEY);
+    if (bodyObj !== undefined) headers["Content-Type"] = "application/json";
+    // HTTP 헤더에는 한글 같은 글자를 그대로 실을 수 없다(라틴 문자만 허용된다).
+    // 그냥 넣으면 브라우저가 요청을 만들지도 못하고 거절해 버린다.
+    // 그래서 영문·숫자·기호만 남도록 감싸서 보내고, 창구 쪽에서 다시 되돌린다.
+    if (key) headers["x-admin-key"] = encodeURIComponent(key);
+    return fetch(API_BASE + path, {
+      method: method,
+      headers: headers,
+      body: bodyObj !== undefined ? JSON.stringify(bodyObj) : undefined
+    }).then(function (res) {
+      return res.text().then(function (text) {
+        var json = null;
+        try { json = text ? JSON.parse(text) : null; } catch (e) { json = null; }
+        return { status: res.status, json: json };
+      });
+    });
+  }
+
+  // 서버 응답에서 사람이 읽을 오류 메시지를 뽑는다. error 필드가 없으면 안내 문구로 대신한다.
+  function errorMessage(result) {
+    if (result.json && typeof result.json.error === "string" && result.json.error) {
+      return result.json.error;
+    }
+    return "알 수 없는 오류가 발생했습니다";
+  }
+
+  function goLock() {
+    sessionStorage.removeItem(SESSION_KEY);
+    app.hidden = true;
+    lockScreen.hidden = false;
+    lockInput.value = "";
+  }
+
+  function goHome() {
+    editView.hidden = true;
+    homeView.hidden = false;
+    state.editingId = null;
+  }
+
+  // ---- 로그인 ----
+  function submitLogin() {
+    var pw = lockInput.value;
+    lockSubmit.disabled = true;
+    clearError(lockError);
+    apiRequest("/login", "POST", { password: pw }).then(function (result) {
+      lockSubmit.disabled = false;
+      if (result.status === 200) {
+        sessionStorage.setItem(SESSION_KEY, pw);
+        lockScreen.hidden = true;
+        app.hidden = false;
+        loadState();
+      } else if (result.status === 401) {
+        showError(lockError, "암호가 맞지 않습니다");
+      }
+      // 그 외 상태코드는 스펙대로 아무것도 보여주지 않는다.
+    }).catch(function () {
+      lockSubmit.disabled = false;
+    });
+  }
+  lockSubmit.addEventListener("click", submitLogin);
+  lockInput.addEventListener("keydown", function (ev) {
+    if (ev.key === "Enter") submitLogin();
+  });
+  lockBtn.addEventListener("click", goLock);
+
+  // ---- 홈 ----
+  function loadState() {
+    clearError(homeError);
+    apiRequest("/state", "GET").then(function (result) {
+      if (result.status === 401) { goLock(); return; }
+      if (result.status !== 200) {
+        showError(homeError, errorMessage(result));
+        return;
+      }
+      state.settings = result.json.settings || {};
+      state.today = result.json.today || {};
+      state.posts = Array.isArray(result.json.posts) ? result.json.posts : [];
+      renderHome();
+    }).catch(function () {
+      showError(homeError, "알 수 없는 오류가 발생했습니다");
+    });
+  }
+
+  function renderHome() {
+    var settings = state.settings || {};
+    var today = state.today || {};
+
+    globalToggle.textContent = settings.global_enabled ? "● ON" : "○ OFF";
+    globalToggle.className = settings.global_enabled ? "btn btn-primary" : "btn";
+
+    var limit = typeof settings.daily_send_limit === "number" ? settings.daily_send_limit : 0;
+    var sent = typeof today.sent === "number" ? today.sent : 0;
+    var ratio = limit > 0 ? (sent / limit) : 0;
+    if (ratio > 1) ratio = 1;
+    if (ratio < 0) ratio = 0;
+    var filled = Math.round(ratio * 10);
+    var bar = "";
+    for (var i = 0; i < 10; i++) bar += (i < filled ? "█" : "░");
+    gaugeText.textContent = "오늘 발송 [" + bar + "] " + sent + "/" + limit;
+
+    var days = settings.token_days_left;
+    tokenLine.className = "mono";
+    if (days === null || days === undefined) {
+      tokenLine.textContent = "토큰 만료일 미설정";
+    } else if (days < 0) {
+      tokenLine.textContent = "토큰 만료됨 (" + Math.abs(days) + "일 지남)";
+      tokenLine.className = "mono warn-line";
+    } else {
+      tokenLine.textContent = "토큰 D-" + days;
+      if (days <= 14) { tokenLine.className = "mono warn-line"; }
+    }
+
+    renderPosts();
+  }
+
+  function renderPosts() {
+    postList.textContent = "";
+    if (state.posts.length === 0) {
+      emptyState.hidden = false;
+      postList.hidden = true;
+      return;
+    }
+    emptyState.hidden = true;
+    postList.hidden = false;
+
+    state.posts.forEach(function (post) {
+      postList.appendChild(buildPostCard(post));
+    });
+  }
+
+  // 사람이 입력한 값(제목·댓글 문구 등)이 섞여 있을 수 있으므로, innerHTML로 문자열을
+  // 이어붙이지 않는다. textContent와 createElement로만 화면 요소를 만들어서,
+  // 값 안에 <script> 같은 것이 들어 있어도 코드로 실행되지 않고 글자 그대로만 보이게 한다.
+  function buildPostCard(post) {
+    var card = document.createElement("div");
+    card.className = "box post-card";
+
+    var top = document.createElement("div");
+    top.className = "row post-top";
+
+    var thumb;
+    if (post.thumbnail_url) {
+      thumb = document.createElement("img");
+      thumb.src = post.thumbnail_url;
+      thumb.alt = "";
+      thumb.className = "post-thumb";
+    } else {
+      thumb = document.createElement("div");
+      thumb.className = "post-thumb post-thumb-empty mono";
+      thumb.textContent = "[img]";
+    }
+    top.appendChild(thumb);
+
+    var info = document.createElement("div");
+    info.className = "post-info";
+
+    var titleEl = document.createElement("div");
+    titleEl.className = "post-title";
+    titleEl.textContent = (post.title && post.title.length > 0) ? post.title : ("게시물 " + post.ig_media_id);
+    info.appendChild(titleEl);
+
+    var statusEl = document.createElement("div");
+    statusEl.className = "mono";
+    statusEl.textContent = post.status === "active" ? "● 실행중" : "○ 정지";
+    info.appendChild(statusEl);
+
+    var counts = post.counts || {};
+    var countsEl = document.createElement("div");
+    countsEl.className = "mono post-counts";
+    countsEl.textContent = "오늘 " + (counts.today_sent || 0) + "건 발송 · 대기 " + (counts.queued || 0) + " · 완료 " + (counts.done || 0);
+    info.appendChild(countsEl);
+
+    top.appendChild(info);
+    card.appendChild(top);
+
+    var actions = document.createElement("div");
+    actions.className = "row post-actions";
+
+    var editBtn = document.createElement("button");
+    editBtn.type = "button";
+    editBtn.className = "btn btn-small";
+    editBtn.textContent = "수정";
+    editBtn.addEventListener("click", function () { openEdit(post.id); });
+    actions.appendChild(editBtn);
+
+    var toggleBtn = document.createElement("button");
+    toggleBtn.type = "button";
+    toggleBtn.className = "btn btn-small";
+    toggleBtn.textContent = post.status === "active" ? "정지하기" : "실행하기";
+    toggleBtn.addEventListener("click", function () {
+      togglePostStatus(post.id, post.status === "active" ? "paused" : "active");
+    });
+    actions.appendChild(toggleBtn);
+
+    var targetsBtn = document.createElement("button");
+    targetsBtn.type = "button";
+    targetsBtn.className = "btn btn-small";
+    targetsBtn.textContent = "대상자 보기(8단계에서)";
+    targetsBtn.disabled = true;
+    actions.appendChild(targetsBtn);
+
+    card.appendChild(actions);
+    return card;
+  }
+
+  function togglePostStatus(id, newStatus) {
+    clearError(homeError);
+    apiRequest("/toggle", "POST", { target: "post", id: id, status: newStatus }).then(function (result) {
+      if (result.status === 401) { goLock(); return; }
+      if (result.status !== 200) {
+        showError(homeError, errorMessage(result));
+        return;
+      }
+      loadState();
+    }).catch(function () {
+      showError(homeError, "알 수 없는 오류가 발생했습니다");
+    });
+  }
+
+  globalToggle.addEventListener("click", function () {
+    var next = !(state.settings && state.settings.global_enabled);
+    clearError(homeError);
+    apiRequest("/toggle", "POST", { target: "global", value: next }).then(function (result) {
+      if (result.status === 401) { goLock(); return; }
+      if (result.status !== 200) {
+        showError(homeError, errorMessage(result));
+        return;
+      }
+      loadState();
+    }).catch(function () {
+      showError(homeError, "알 수 없는 오류가 발생했습니다");
+    });
+  });
+
+  refreshBtn.addEventListener("click", loadState);
+  addPostBtn.addEventListener("click", function () { openEdit(null); });
+  cancelBtn.addEventListener("click", goHome);
+
+  // ---- 편집 화면 ----
+  function resetForm() {
+    fMediaId.value = "";
+    fMediaId.readOnly = false;
+    fTitle.value = "";
+    fPermalink.value = "";
+    fThumb.value = "";
+    fTriggerAny.checked = true;
+    fTriggerKeyword.checked = false;
+    fKeywords.value = "";
+    fIgnoreCase.checked = true;
+    fIgnoreSpace.checked = true;
+    fStep1Msg.value = "";
+    fStep1Btn.value = "";
+    fStep2Msg.value = "";
+    fStep2Link.value = "";
+    fNotFollowing.value = "";
+    fMaxRetry.value = "3";
+    fCommentReplies.value = "";
+    fReplyToComment.checked = true;
+    fStatusActive.checked = true;
+    fStatusPaused.checked = false;
+    updateKeywordVisibility();
+    updatePreview();
+  }
+
+  function fillForm(post) {
+    fMediaId.value = post.ig_media_id || "";
+    fMediaId.readOnly = true;
+    fTitle.value = post.title || "";
+    fPermalink.value = post.permalink || "";
+    fThumb.value = post.thumbnail_url || "";
+    if (post.trigger_type === "keyword") {
+      fTriggerKeyword.checked = true;
+    } else {
+      fTriggerAny.checked = true;
+    }
+    fKeywords.value = Array.isArray(post.keywords) ? post.keywords.join("\n") : "";
+    fIgnoreCase.checked = post.ignore_case !== false;
+    fIgnoreSpace.checked = post.ignore_space !== false;
+    fStep1Msg.value = post.step1_message || "";
+    fStep1Btn.value = post.step1_button_label || "";
+    fStep2Msg.value = post.step2_message || "";
+    fStep2Link.value = post.step2_link || "";
+    fNotFollowing.value = post.not_following_message || "";
+    fMaxRetry.value = (typeof post.max_retry === "number") ? String(post.max_retry) : "3";
+    fCommentReplies.value = Array.isArray(post.comment_replies) ? post.comment_replies.join("\n") : "";
+    fReplyToComment.checked = post.reply_to_comment !== false;
+    if (post.status === "paused") {
+      fStatusPaused.checked = true;
+    } else {
+      fStatusActive.checked = true;
+    }
+    updateKeywordVisibility();
+    updatePreview();
+  }
+
+  function updateKeywordVisibility() {
+    fKeywordsWrap.hidden = !fTriggerKeyword.checked;
+  }
+  fTriggerAny.addEventListener("change", updateKeywordVisibility);
+  fTriggerKeyword.addEventListener("change", updateKeywordVisibility);
+
+  function openEdit(id) {
+    clearError(editError);
+    state.editingId = id;
+    homeView.hidden = true;
+    editView.hidden = false;
+    resetForm();
+
+    if (!id) {
+      return;
+    }
+
+    apiRequest("/post?id=" + encodeURIComponent(id), "GET").then(function (result) {
+      if (result.status === 401) { goLock(); return; }
+      if (result.status !== 200) {
+        showError(editError, errorMessage(result));
+        return;
+      }
+      fillForm(result.json);
+    }).catch(function () {
+      showError(editError, "알 수 없는 오류가 발생했습니다");
+    });
+  }
+
+  function linesToArray(text) {
+    return text.split("\n").map(function (s) { return s.trim(); }).filter(function (s) { return s.length > 0; });
+  }
+
+  function buildPayload() {
+    var payload = {
+      ig_media_id: fMediaId.value.trim(),
+      title: fTitle.value,
+      permalink: fPermalink.value.trim(),
+      thumbnail_url: fThumb.value.trim(),
+      trigger_type: fTriggerKeyword.checked ? "keyword" : "any",
+      keywords: linesToArray(fKeywords.value),
+      ignore_case: fIgnoreCase.checked,
+      ignore_space: fIgnoreSpace.checked,
+      step1_message: fStep1Msg.value,
+      step1_button_label: fStep1Btn.value,
+      step2_message: fStep2Msg.value,
+      step2_link: fStep2Link.value.trim(),
+      not_following_message: fNotFollowing.value,
+      max_retry: parseInt(fMaxRetry.value, 10),
+      comment_replies: linesToArray(fCommentReplies.value),
+      reply_to_comment: fReplyToComment.checked,
+      status: fStatusPaused.checked ? "paused" : "active"
+    };
+    if (isNaN(payload.max_retry)) payload.max_retry = 3;
+    if (state.editingId) payload.id = state.editingId;
+    return payload;
+  }
+
+  saveBtn.addEventListener("click", function () {
+    if (state.saving) return;
+    state.saving = true;
+    saveBtn.disabled = true;
+    clearError(editError);
+    var payload = buildPayload();
+    apiRequest("/post", "POST", payload).then(function (result) {
+      state.saving = false;
+      saveBtn.disabled = false;
+      if (result.status === 401) { goLock(); return; }
+      if (result.status !== 200) {
+        showError(editError, errorMessage(result));
+        return;
+      }
+      goHome();
+      loadState();
+    }).catch(function () {
+      state.saving = false;
+      saveBtn.disabled = false;
+      showError(editError, "알 수 없는 오류가 발생했습니다");
+    });
+  });
+
+  // ---- 미리보기 ----
+  function bubble(text) {
+    var b = document.createElement("div");
+    b.className = "preview-bubble";
+    b.textContent = text;
+    return b;
+  }
+
+  function updatePreview() {
+    previewBody.textContent = "";
+
+    var step1 = fStep1Msg.value.trim();
+    if (step1) {
+      previewBody.appendChild(bubble(step1));
+      var btnLabel = fStep1Btn.value.trim();
+      if (btnLabel) {
+        var btn = document.createElement("div");
+        btn.className = "preview-btn mono";
+        btn.textContent = "[ " + btnLabel + " ]";
+        previewBody.appendChild(btn);
+      }
+    }
+
+    var step2 = fStep2Msg.value.trim();
+    if (step2) {
+      previewBody.appendChild(bubble(step2));
+      var link = fStep2Link.value.trim();
+      if (link) {
+        var linkEl = document.createElement("div");
+        linkEl.className = "preview-link mono";
+        linkEl.textContent = link;
+        previewBody.appendChild(linkEl);
+      }
+    }
+
+    var notFollowing = fNotFollowing.value.trim();
+    if (notFollowing) {
+      previewBody.appendChild(bubble(notFollowing));
+    }
+
+    if (!step1 && !step2 && !notFollowing) {
+      var empty = document.createElement("div");
+      empty.className = "mono";
+      empty.textContent = "내용을 입력하면 여기에 미리보기가 나타납니다";
+      previewBody.appendChild(empty);
+    }
+  }
+
+  [fStep1Msg, fStep1Btn, fStep2Msg, fStep2Link, fNotFollowing].forEach(function (elm) {
+    elm.addEventListener("input", updatePreview);
+  });
+
+  // ---- 시작 ----
+  var savedKey = sessionStorage.getItem(SESSION_KEY);
+  if (savedKey) {
+    lockScreen.hidden = true;
+    app.hidden = false;
+    loadState();
+  } else {
+    lockScreen.hidden = false;
+    app.hidden = true;
+  }
+})();
+</script>
+</body>
+</html>
