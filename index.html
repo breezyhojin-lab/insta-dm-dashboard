@@ -51,8 +51,11 @@
   .warn-line{
     color:var(--warn); border:2px solid var(--warn); padding:6px 8px; font-weight:bold; display:inline-block;
   }
+  /* 입력칸 글자 크기는 반드시 16px 이상이어야 한다. 아이폰 사파리는 글자가
+     16px 보다 작은 입력칸을 누르는 순간 화면을 저절로 확대하는데, 그 확대가
+     그대로 남아 화면 전체가 커 보이는 일이 생긴다. 그래서 15px 로 두지 않는다. */
   .text-input, input[type="text"], input[type="password"], input[type="number"], textarea{
-    font-family:var(--sans); font-size:15px; padding:10px; border:2px solid var(--line);
+    font-family:var(--sans); font-size:16px; padding:10px; border:2px solid var(--line);
     border-radius:0; background:var(--input-bg); color:var(--fg); width:100%; min-height:44px;
   }
   textarea{ font-family:var(--mono); min-height:88px; resize:vertical; }
