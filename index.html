@@ -488,6 +488,14 @@
       if (days <= 14) { tokenLine.className = "mono warn-line"; }
     }
 
+    // 9단계: 자동 갱신이 마지막으로 성공한 시각을 한 줄 뒤에 덧붙인다(한국 시간).
+    if (settings.token_refreshed_at) {
+      var refreshedParts = kstParts(settings.token_refreshed_at);
+      tokenLine.textContent += " · 마지막 갱신 " + refreshedParts.month + "-" + refreshedParts.day;
+    } else {
+      tokenLine.textContent += " · 자동 갱신 기록 없음";
+    }
+
     renderPosts();
   }
 
