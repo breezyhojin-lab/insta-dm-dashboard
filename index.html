@@ -242,6 +242,32 @@
       </div>
     </div>
   </div>
+
+  <div id="leads-view" hidden>
+    <div class="row space-between" style="margin-bottom:8px; flex-wrap:wrap;">
+      <div id="leads-title" class="ascii-title mono" style="margin:0;">┌─ 대상자 ─┐</div>
+      <div class="row">
+        <button id="leads-back-btn" type="button" class="btn btn-small">← 홈</button>
+        <button id="leads-refresh-btn" type="button" class="btn btn-small">새로고침</button>
+      </div>
+    </div>
+
+    <div id="leads-error" class="error-text" hidden></div>
+
+    <div id="leads-filter-row" class="row" style="margin-bottom:10px;">
+      <button type="button" class="btn btn-small" data-filter="all">전체</button>
+      <button type="button" class="btn btn-small" data-filter="waiting">대기</button>
+      <button type="button" class="btn btn-small" data-filter="follow">팔로우 대기</button>
+      <button type="button" class="btn btn-small" data-filter="done">완료</button>
+      <button type="button" class="btn btn-small" data-filter="failed">실패</button>
+    </div>
+
+    <div id="leads-list"></div>
+
+    <div id="leads-empty" class="box" hidden>
+      <p style="margin-top:0;">해당하는 대상자가 없습니다.</p>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -257,7 +283,23 @@
   // 위험이 있다. 그래서 여기서는 절대 로컬스토리지를 쓰지 않는다.
   var SESSION_KEY = "admin_dm_key";
 
-  var state = { posts: [], settings: null, today: null, editingId: null, saving: false };
+  var state = {
+    posts: [], settings: null, today: null, editingId: null, saving: false,
+    leadsPost: null, leadsFilter: "all"
+  };
+
+  // 화면에 보여줄 상태 배지 문구. 대상자 state 값 → 사람이 읽을 한글.
+  var LEAD_STATE_LABELS = {
+    queued: "대기",
+    step1_sent: "DM① 보냄",
+    awaiting_follow: "팔로우 대기",
+    manual_check: "확인 필요",
+    verified: "팔로우 확인됨",
+    link_sent: "링크 보냄",
+    done: "완료",
+    failed: "실패",
+    skipped: "건너뜀"
+  };
 
   var lockScreen = document.getElementById("lock-screen");
   var app = document.getElementById("app");
@@ -268,8 +310,16 @@
 
   var homeView = document.getElementById("home-view");
   var editView = document.getElementById("edit-view");
+  var leadsView = document.getElementById("leads-view");
   var homeError = document.getElementById("home-error");
   var editError = document.getElementById("edit-error");
+  var leadsError = document.getElementById("leads-error");
+  var leadsTitle = document.getElementById("leads-title");
+  var leadsBackBtn = document.getElementById("leads-back-btn");
+  var leadsRefreshBtn = document.getElementById("leads-refresh-btn");
+  var leadsFilterRow = document.getElementById("leads-filter-row");
+  var leadsList = document.getElementById("leads-list");
+  var leadsEmpty = document.getElementById("leads-empty");
   var globalToggle = document.getElementById("global-toggle");
   var gaugeText = document.getElementById("gauge-text");
   var tokenLine = document.getElementById("token-line");
@@ -350,6 +400,7 @@
 
   function goHome() {
     editView.hidden = true;
+    leadsView.hidden = true;
     homeView.hidden = false;
     state.editingId = null;
   }
@@ -512,8 +563,8 @@
     var targetsBtn = document.createElement("button");
     targetsBtn.type = "button";
     targetsBtn.className = "btn btn-small";
-    targetsBtn.textContent = "대상자 보기(8단계에서)";
-    targetsBtn.disabled = true;
+    targetsBtn.textContent = "대상자 보기";
+    targetsBtn.addEventListener("click", function () { openLeads(post); });
     actions.appendChild(targetsBtn);
 
     card.appendChild(actions);
@@ -552,6 +603,209 @@
   refreshBtn.addEventListener("click", loadState);
   addPostBtn.addEventListener("click", function () { openEdit(null); });
   cancelBtn.addEventListener("click", goHome);
+
+  // ---- 대상자 목록(8단계) ----
+
+  // 한국시간(Asia/Seoul) 기준 월/일/시/분을 뽑아낸다. DB 값은 전부 UTC라서,
+  // 화면에 그대로 찍으면 사람이 보는 시각과 최대 9시간 어긋난다.
+  function kstParts(isoString) {
+    var d = new Date(isoString);
+    var fmt = new Intl.DateTimeFormat("en-GB", {
+      timeZone: "Asia/Seoul", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false
+    });
+    var parts = {};
+    fmt.formatToParts(d).forEach(function (p) { parts[p.type] = p.value; });
+    return parts;
+  }
+
+  // 있는 시각만 골라 "댓글 09-11 12:21 · DM① 12:21 · 링크 12:22 · 답글 12:24" 식으로 만든다.
+  // 앞의 시각과 같은 날짜면 날짜는 생략한다.
+  function buildTimeLine(lead) {
+    var items = [
+      ["댓글", lead.comment_created_at],
+      ["DM①", lead.step1_sent_at],
+      ["팔로우 확인", lead.follow_verified_at],
+      ["링크", lead.step2_sent_at],
+      ["답글", lead.replied_at]
+    ];
+    var lastDateKey = null;
+    var segs = [];
+    items.forEach(function (item) {
+      var label = item[0];
+      var value = item[1];
+      if (!value) return;
+      var p = kstParts(value);
+      var dateKey = p.month + "-" + p.day;
+      var text = (dateKey === lastDateKey ? "" : (dateKey + " ")) + p.hour + ":" + p.minute;
+      lastDateKey = dateKey;
+      segs.push(label + " " + text);
+    });
+    return segs.join(" · ");
+  }
+
+  // 대상자 state → 배지 문구. link_sent인데 comment_reply 실패 일감이 남아 있으면
+  // "링크는 갔는데 답글만 실패"라는 특수 문구로 바꾼다.
+  function leadStateLabel(lead) {
+    if (lead.state === "link_sent" && lead.failed_job && lead.failed_job.kind === "comment_reply") {
+      return "링크 보냄·답글 실패";
+    }
+    return LEAD_STATE_LABELS[lead.state] || lead.state;
+  }
+
+  function leadAction(action, id, btn) {
+    if (btn) btn.disabled = true;
+    clearError(leadsError);
+    apiRequest("/lead-action", "POST", { action: action, id: id }).then(function (result) {
+      if (result.status === 401) { goLock(); return; }
+      if (result.status !== 200) {
+        showError(leadsError, errorMessage(result));
+        if (btn) btn.disabled = false;
+        return;
+      }
+      loadLeads();
+    }).catch(function () {
+      showError(leadsError, "알 수 없는 오류가 발생했습니다");
+      if (btn) btn.disabled = false;
+    });
+  }
+
+  // 사람이 입력한 값(username·comment_text·last_error)이 섞여 있으므로, 이 카드도
+  // post 카드와 마찬가지로 textContent·createElement로만 만든다.
+  function buildLeadCard(lead) {
+    var card = document.createElement("div");
+    card.className = "box";
+
+    var top = document.createElement("div");
+    top.className = "row space-between";
+
+    var nameEl = document.createElement("span");
+    nameEl.textContent = "@" + (lead.username || "(알 수 없음)");
+    top.appendChild(nameEl);
+
+    var badge = document.createElement("span");
+    badge.className = "mono";
+    badge.textContent = "[" + leadStateLabel(lead) + "]";
+    top.appendChild(badge);
+
+    card.appendChild(top);
+
+    if (lead.comment_text) {
+      var commentEl = document.createElement("div");
+      commentEl.style.marginTop = "6px";
+      commentEl.style.wordBreak = "break-word";
+      commentEl.textContent = lead.comment_text;
+      card.appendChild(commentEl);
+    }
+
+    var timeLine = buildTimeLine(lead);
+    if (timeLine) {
+      var timeEl = document.createElement("div");
+      timeEl.className = "mono";
+      timeEl.style.marginTop = "6px";
+      timeEl.style.fontSize = "13px";
+      timeEl.textContent = timeLine;
+      card.appendChild(timeEl);
+    }
+
+    var errText = lead.last_error || (lead.failed_job && lead.failed_job.last_error);
+    if (errText) {
+      var errEl = document.createElement("div");
+      errEl.className = "error-text";
+      errEl.style.margin = "6px 0 0";
+      errEl.textContent = "실패: " + errText;
+      card.appendChild(errEl);
+    }
+
+    var actions = document.createElement("div");
+    actions.className = "row";
+    actions.style.marginTop = "8px";
+    var hasAction = false;
+
+    if (lead.failed_job) {
+      hasAction = true;
+      var retryBtn = document.createElement("button");
+      retryBtn.type = "button";
+      retryBtn.className = "btn btn-small";
+      retryBtn.textContent = "다시 시도";
+      retryBtn.addEventListener("click", function () { leadAction("retry", lead.id, retryBtn); });
+      actions.appendChild(retryBtn);
+    }
+    if (lead.state === "manual_check") {
+      hasAction = true;
+      var passBtn = document.createElement("button");
+      passBtn.type = "button";
+      passBtn.className = "btn btn-small";
+      passBtn.textContent = "수동 통과";
+      passBtn.addEventListener("click", function () { leadAction("manual_pass", lead.id, passBtn); });
+      actions.appendChild(passBtn);
+    }
+    if (hasAction) card.appendChild(actions);
+
+    return card;
+  }
+
+  function renderLeads(leads) {
+    leadsList.textContent = "";
+    if (leads.length === 0) {
+      leadsEmpty.hidden = false;
+      leadsList.hidden = true;
+      return;
+    }
+    leadsEmpty.hidden = true;
+    leadsList.hidden = false;
+    leads.forEach(function (lead) { leadsList.appendChild(buildLeadCard(lead)); });
+  }
+
+  function updateFilterButtons() {
+    Array.prototype.forEach.call(leadsFilterRow.querySelectorAll("button"), function (btn) {
+      var active = btn.getAttribute("data-filter") === state.leadsFilter;
+      btn.className = active ? "btn btn-small btn-primary" : "btn btn-small";
+    });
+  }
+
+  function loadLeads() {
+    if (!state.leadsPost) return;
+    clearError(leadsError);
+    apiRequest(
+      "/leads?post_id=" + encodeURIComponent(state.leadsPost.id) + "&filter=" + encodeURIComponent(state.leadsFilter),
+      "GET"
+    ).then(function (result) {
+      if (result.status === 401) { goLock(); return; }
+      if (result.status !== 200) {
+        showError(leadsError, errorMessage(result));
+        return;
+      }
+      var leads = Array.isArray(result.json.leads) ? result.json.leads : [];
+      renderLeads(leads);
+    }).catch(function () {
+      showError(leadsError, "알 수 없는 오류가 발생했습니다");
+    });
+  }
+
+  function openLeads(post) {
+    clearError(leadsError);
+    state.leadsPost = post;
+    state.leadsFilter = "all";
+    leadsTitle.textContent = "┌─ 대상자: " + ((post.title && post.title.length > 0) ? post.title : ("게시물 " + post.ig_media_id)) + " ─┐";
+    homeView.hidden = true;
+    leadsView.hidden = false;
+    updateFilterButtons();
+    loadLeads();
+  }
+
+  leadsBackBtn.addEventListener("click", function () {
+    leadsView.hidden = true;
+    homeView.hidden = false;
+    loadState();
+  });
+  leadsRefreshBtn.addEventListener("click", loadLeads);
+  Array.prototype.forEach.call(leadsFilterRow.querySelectorAll("button"), function (btn) {
+    btn.addEventListener("click", function () {
+      state.leadsFilter = btn.getAttribute("data-filter");
+      updateFilterButtons();
+      loadLeads();
+    });
+  });
 
   // ---- 편집 화면 ----
   function resetForm() {
