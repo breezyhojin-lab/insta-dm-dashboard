@@ -150,22 +150,26 @@
       <div class="edit-form stack">
 
         <div class="field">
-          <label class="field-label" for="f-media-id">게시물 번호(숫자만)</label>
-          <input id="f-media-id" type="text" inputmode="numeric" autocomplete="off">
-          <div class="field-hint">새로 등록할 때만 입력할 수 있고, 수정할 때는 바꿀 수 없습니다.</div>
-        </div>
-
-        <div class="field">
           <label class="field-label" for="f-title">제목</label>
           <input id="f-title" type="text">
         </div>
 
         <div class="field">
           <label class="field-label" for="f-permalink">게시물 링크</label>
-          <input id="f-permalink" type="text" placeholder="https://...">
+          <div class="row" style="flex-wrap:nowrap;">
+            <input id="f-permalink" type="text" placeholder="https://..." style="flex:1;">
+            <button id="resolve-media-btn" type="button" class="btn btn-small">번호 찾기</button>
+          </div>
         </div>
 
         <div class="field">
+          <label class="field-label" for="f-media-id">게시물 번호(숫자만)</label>
+          <input id="f-media-id" type="text" inputmode="numeric" autocomplete="off">
+          <div id="f-media-id-hint" class="field-hint">링크를 넣고 [번호 찾기]를 누르면 자동으로 채워집니다. 못 찾으면 직접 입력하세요.</div>
+          <div id="resolve-media-status" class="field-hint" hidden></div>
+        </div>
+
+        <div class="field" id="f-thumb-wrap" hidden>
           <label class="field-label" for="f-thumb">썸네일 주소</label>
           <input id="f-thumb" type="text" placeholder="https://...">
         </div>
@@ -190,13 +194,23 @@
         </div>
 
         <div class="field">
-          <label class="field-label" for="f-step1-msg">첫 DM 본문</label>
-          <textarea id="f-step1-msg" rows="4"></textarea>
+          <div class="field-label">DM 방식</div>
+          <div class="radio-group">
+            <label class="checkbox-row"><input type="radio" name="follow_required" id="f-follow-required">팔로우 확인 후 링크 보내기 (기본)</label>
+            <label class="checkbox-row"><input type="radio" name="follow_required" id="f-follow-skip">바로 링크 보내기 — 팔로우 확인 없이 댓글 즉시 DM</label>
+          </div>
         </div>
 
-        <div class="field">
-          <label class="field-label" for="f-step1-btn">버튼 문구(최대 20자)</label>
-          <input id="f-step1-btn" type="text" maxlength="20">
+        <div id="f-dm1-wrap">
+          <div class="field">
+            <label class="field-label" for="f-step1-msg">첫 DM 본문</label>
+            <textarea id="f-step1-msg" rows="4"></textarea>
+          </div>
+
+          <div class="field">
+            <label class="field-label" for="f-step1-btn">버튼 문구(최대 20자)</label>
+            <input id="f-step1-btn" type="text" maxlength="20">
+          </div>
         </div>
 
         <div class="field">
@@ -209,14 +223,16 @@
           <input id="f-step2-link" type="text" placeholder="https://...">
         </div>
 
-        <div class="field">
-          <label class="field-label" for="f-not-following">팔로우 안 했을 때 안내</label>
-          <textarea id="f-not-following" rows="3"></textarea>
-        </div>
+        <div id="f-follow-extra-wrap">
+          <div class="field">
+            <label class="field-label" for="f-not-following">팔로우 안 했을 때 안내</label>
+            <textarea id="f-not-following" rows="3"></textarea>
+          </div>
 
-        <div class="field">
-          <label class="field-label" for="f-max-retry">재시도 횟수(0~10)</label>
-          <input id="f-max-retry" type="number" min="0" max="10" step="1">
+          <div class="field">
+            <label class="field-label" for="f-max-retry">재시도 횟수(0~10)</label>
+            <input id="f-max-retry" type="number" min="0" max="10" step="1">
+          </div>
         </div>
 
         <div class="field">
@@ -290,6 +306,10 @@
   // 위험이 있다. 그래서 여기서는 절대 로컬스토리지를 쓰지 않는다.
   var SESSION_KEY = "admin_dm_key";
 
+  // 게시물 번호 칸 아래 고정 안내 문구. 새로 만들기/수정 모드에 따라 갈아 끼운다.
+  var NEW_MEDIA_HINT = "링크를 넣고 [번호 찾기]를 누르면 자동으로 채워집니다. 못 찾으면 직접 입력하세요.";
+  var EDIT_MEDIA_HINT = "새로 등록할 때만 입력할 수 있고, 수정할 때는 바꿀 수 없습니다.";
+
   var state = {
     posts: [], settings: null, today: null, editingId: null, saving: false,
     leadsPost: null, leadsFilter: "all"
@@ -341,6 +361,9 @@
   var previewBody = document.getElementById("preview-body");
 
   var fMediaId = document.getElementById("f-media-id");
+  var fMediaIdHint = document.getElementById("f-media-id-hint");
+  var resolveMediaStatus = document.getElementById("resolve-media-status");
+  var resolveMediaBtn = document.getElementById("resolve-media-btn");
   var fTitle = document.getElementById("f-title");
   var fPermalink = document.getElementById("f-permalink");
   var fThumb = document.getElementById("f-thumb");
@@ -350,6 +373,10 @@
   var fKeywords = document.getElementById("f-keywords");
   var fIgnoreCase = document.getElementById("f-ignore-case");
   var fIgnoreSpace = document.getElementById("f-ignore-space");
+  var fFollowRequired = document.getElementById("f-follow-required");
+  var fFollowSkip = document.getElementById("f-follow-skip");
+  var fDm1Wrap = document.getElementById("f-dm1-wrap");
+  var fFollowExtraWrap = document.getElementById("f-follow-extra-wrap");
   var fStep1Msg = document.getElementById("f-step1-msg");
   var fStep1Btn = document.getElementById("f-step1-btn");
   var fStep2Msg = document.getElementById("f-step2-msg");
@@ -848,10 +875,54 @@
     });
   });
 
+  // ---- 게시물 번호 자동 채우기(/resolve-media) ----
+  function clearResolveStatus() {
+    resolveMediaStatus.textContent = "";
+    resolveMediaStatus.className = "field-hint";
+    resolveMediaStatus.hidden = true;
+  }
+
+  function showResolveStatus(message, isError) {
+    resolveMediaStatus.textContent = message;
+    resolveMediaStatus.className = isError ? "error-text" : "field-hint";
+    resolveMediaStatus.hidden = false;
+  }
+
+  function resolveMedia() {
+    var link = fPermalink.value.trim();
+    if (!link) return;
+    resolveMediaBtn.disabled = true;
+    showResolveStatus("찾는 중…", false);
+    apiRequest("/resolve-media?url=" + encodeURIComponent(link), "GET").then(function (result) {
+      resolveMediaBtn.disabled = false;
+      if (result.status === 401) { goLock(); return; }
+      if (result.status === 200) {
+        fMediaId.value = result.json.id;
+        fPermalink.value = result.json.permalink;
+        if (!fTitle.value.trim() && result.json.caption) {
+          fTitle.value = result.json.caption;
+        }
+        var parts = kstParts(result.json.timestamp);
+        showResolveStatus("찾았습니다 · " + parts.month + "-" + parts.day + " 게시물", false);
+        return;
+      }
+      showResolveStatus(errorMessage(result), true);
+    }).catch(function () {
+      resolveMediaBtn.disabled = false;
+      showResolveStatus("알 수 없는 오류가 발생했습니다", true);
+    });
+  }
+
+  resolveMediaBtn.addEventListener("click", resolveMedia);
+  fPermalink.addEventListener("change", resolveMedia);
+
   // ---- 편집 화면 ----
   function resetForm() {
     fMediaId.value = "";
     fMediaId.readOnly = false;
+    fMediaIdHint.textContent = NEW_MEDIA_HINT;
+    resolveMediaBtn.hidden = false;
+    clearResolveStatus();
     fTitle.value = "";
     fPermalink.value = "";
     fThumb.value = "";
@@ -860,6 +931,8 @@
     fKeywords.value = "";
     fIgnoreCase.checked = true;
     fIgnoreSpace.checked = true;
+    fFollowRequired.checked = true;
+    fFollowSkip.checked = false;
     fStep1Msg.value = "";
     fStep1Btn.value = "";
     fStep2Msg.value = "";
@@ -871,12 +944,16 @@
     fStatusActive.checked = true;
     fStatusPaused.checked = false;
     updateKeywordVisibility();
+    updateFollowVisibility();
     updatePreview();
   }
 
   function fillForm(post) {
     fMediaId.value = post.ig_media_id || "";
     fMediaId.readOnly = true;
+    fMediaIdHint.textContent = EDIT_MEDIA_HINT;
+    resolveMediaBtn.hidden = true;
+    clearResolveStatus();
     fTitle.value = post.title || "";
     fPermalink.value = post.permalink || "";
     fThumb.value = post.thumbnail_url || "";
@@ -888,6 +965,11 @@
     fKeywords.value = Array.isArray(post.keywords) ? post.keywords.join("\n") : "";
     fIgnoreCase.checked = post.ignore_case !== false;
     fIgnoreSpace.checked = post.ignore_space !== false;
+    if (post.require_follow === false) {
+      fFollowSkip.checked = true;
+    } else {
+      fFollowRequired.checked = true;
+    }
     fStep1Msg.value = post.step1_message || "";
     fStep1Btn.value = post.step1_button_label || "";
     fStep2Msg.value = post.step2_message || "";
@@ -902,6 +984,7 @@
       fStatusActive.checked = true;
     }
     updateKeywordVisibility();
+    updateFollowVisibility();
     updatePreview();
   }
 
@@ -910,6 +993,23 @@
   }
   fTriggerAny.addEventListener("change", updateKeywordVisibility);
   fTriggerKeyword.addEventListener("change", updateKeywordVisibility);
+
+  // "바로 링크"를 고르면 DM①(본문·버튼)·미팔로우 안내·재시도 횟수는 아예 안 쓰이므로
+  // 접어 둔다. DM②(링크 DM 본문·링크 주소)는 "바로 링크"에서도 그대로 나가는
+  // 내용이라 숨기지 않는다.
+  function updateFollowVisibility() {
+    var hide = fFollowSkip.checked;
+    fDm1Wrap.hidden = hide;
+    fFollowExtraWrap.hidden = hide;
+  }
+  fFollowRequired.addEventListener("change", function () {
+    updateFollowVisibility();
+    updatePreview();
+  });
+  fFollowSkip.addEventListener("change", function () {
+    updateFollowVisibility();
+    updatePreview();
+  });
 
   function openEdit(id) {
     clearError(editError);
@@ -956,6 +1056,7 @@
       max_retry: parseInt(fMaxRetry.value, 10),
       comment_replies: linesToArray(fCommentReplies.value),
       reply_to_comment: fReplyToComment.checked,
+      require_follow: !fFollowSkip.checked,
       status: fStatusPaused.checked ? "paused" : "active"
     };
     if (isNaN(payload.max_retry)) payload.max_retry = 3;
@@ -997,7 +1098,11 @@
   function updatePreview() {
     previewBody.textContent = "";
 
-    var step1 = fStep1Msg.value.trim();
+    // "바로 링크"를 고르면 DM①(버튼 포함)은 아예 나가지 않으므로 미리보기에도
+    // 그리지 않는다 — DM②(문구+링크) 한 통만 보인다.
+    var skipDm1 = fFollowSkip.checked;
+
+    var step1 = skipDm1 ? "" : fStep1Msg.value.trim();
     if (step1) {
       previewBody.appendChild(bubble(step1));
       var btnLabel = fStep1Btn.value.trim();
@@ -1021,7 +1126,7 @@
       }
     }
 
-    var notFollowing = fNotFollowing.value.trim();
+    var notFollowing = skipDm1 ? "" : fNotFollowing.value.trim();
     if (notFollowing) {
       previewBody.appendChild(bubble(notFollowing));
     }
